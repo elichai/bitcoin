@@ -888,6 +888,9 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState &state, const CTransa
         CCoinsView dummy;
         CCoinsViewCache view(dummy);
 
+        int64_t nConflictingFees = 0;
+        unsigned int nConflictingSize = 0;
+
         {
         LOCK(pool.cs);
         CCoinsViewMemPool viewMemPool(*pcoinsTip, pool);
@@ -912,6 +915,43 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState &state, const CTransa
         if (!view.HaveInputs(tx))
             return state.Invalid(error("AcceptToMemoryPool : inputs already spent"),
                                  REJECT_DUPLICATE, "bad-txns-inputs-spent");
+
+        // While we have the mempool locked determine total fees and size
+        // of conflicting transactions.
+
+        // Populate set with conflicting transactions we're directly
+        // double-spending.
+        set<const CTransaction *> sptxConflicts;
+        BOOST_FOREACH(const CTxIn txin, tx.vin) {
+            if (pool.mapNextTx.count(txin.prevout))
+                sptxConflicts.insert(pool.mapNextTx[txin.prevout].ptx);
+        }
+
+        while (sptxConflicts.size())
+        {
+            std::set<const CTransaction *>::iterator it;
+            it = sptxConflicts.begin();
+            const CTransaction *ptxConflicting = *it;
+            sptxConflicts.erase(it);
+
+            nConflictingFees += view.GetValueIn(*ptxConflicting) - ptxConflicting->GetValueOut();
+            nConflictingSize += ::GetSerializeSize(*ptxConflicting, SER_NETWORK, PROTOCOL_VERSION);
+
+            // Limit DoS potential by simply rejecting large double-spends
+            if (nConflictingSize > MAX_STANDARD_TX_SIZE * 2)
+                return state.Invalid(error("AcceptToMemoryPool : too many conflicting txs for replacement; can't replace with %s",
+                                           hash.ToString()),
+                                     REJECT_DUPLICATE, "bad-txns-inputs-spent");
+
+            // Add children
+            uint256 hashConflicting = ptxConflicting->GetHash();
+            for (unsigned int i = 0; i < ptxConflicting->vout.size(); i++)
+            {
+                COutPoint outpoint(hashConflicting, i);
+                if (pool.mapNextTx.count(outpoint))
+                    sptxConflicts.insert(pool.mapNextTx[outpoint].ptx);
+            }
+        }
 
         // Bring the best block into scope
         view.GetBestBlock();
@@ -972,14 +1012,68 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState &state, const CTransa
                          hash.ToString(),
                          nFees, CTransaction::nMinRelayTxFee * 10000);
 
+        // If there are conflicting transactions, determine if replacing them
+        // would be economically rational. In theory this would be simply "pays
+        // more fees-per-KB" than conflicting modulo possible total fee
+        // reductions, but we have to think about DoS attacks too.
+        if (nConflictingSize > 0)
+        {
+            // First of all we can't allow a replacement unless it pays greater
+            // fees than the transactions it conflicts with - if we did the
+            // bandwidth used by those conflicting transactions would not be
+            // paid for.
+            if (nFees < nConflictingFees)
+                return state.DoS(0,
+                    error("AcceptToMemoryPool : rejecting replacement %s, pays less fees than conflicting txs; %s < %s",
+                          hash.ToString(),
+                          FormatMoney(nFees),
+                          FormatMoney(nConflictingFees)),
+                    REJECT_INSUFFICIENTFEE, "insufficient fee");
+
+            // Secondly in addition to paying more fees than the conflicts the
+            // new transaction must additionally pay for its own bandwidth.
+            int64_t nDeltaFees = nFees - nConflictingFees;
+            int64_t nRelayFee = (int64_t)((double)nSize/1000 * CTransaction::nMinRelayTxFee);
+            if (nDeltaFees < nRelayFee)
+                return state.DoS(0,
+                    error("AcceptToMemoryPool : rejecting replacement %s, not enough additional fees to relay; %s < %s",
+                          hash.ToString(),
+                          FormatMoney(nDeltaFees),
+                          FormatMoney(nRelayFee)),
+                    REJECT_INSUFFICIENTFEE, "insufficient fee");
+
+            // Replace only if new fees-per-kb is > previous fees-per-kb.
+            double dOldFeesPerKB = (double)nConflictingFees/((double)nConflictingSize/1000);
+            double dNewFeesPerKB = (double)nFees/((double)nSize/1000);
+            if (dOldFeesPerKB > dNewFeesPerKB)
+                return state.DoS(0, error("AcceptToMemoryPool : rejecting uneconomical replacement %s; %f BTC/KB < %d BTC/KB",
+                                          hash.ToString(), dNewFeesPerKB/COIN, dOldFeesPerKB/COIN),
+                                 REJECT_INSUFFICIENTFEE, "insufficient fee");
+        }
+
         // Check against previous transactions
         // This is done last to help prevent CPU exhaustion denial-of-service attacks.
         if (!CheckInputs(tx, state, view, true, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC))
         {
             return error("AcceptToMemoryPool: : ConnectInputs failed %s", hash.ToString());
         }
+
+        // Remove conflicting transactions from the mempool
+        list<CTransaction> ltxConflicted;
+        mempool.removeConflicts(tx, ltxConflicted);
+
         // Store transaction in memory
         pool.addUnchecked(hash, entry);
+
+        BOOST_FOREACH(const CTransaction &txConflicted, ltxConflicted) {
+            LogPrint("mempool", "replacing tx %s with %s for %s BTC additional fees, %d delta bytes\n",
+                    txConflicted.GetHash().ToString(),
+                    hash.ToString(),
+                    FormatMoney(nFees - nConflictingFees),
+                    (int)nSize - (int)nConflictingSize);
+
+            // Should tell wallets about transactions that were replaced here.
+        }
     }
 
     g_signals.SyncTransaction(hash, tx, NULL);
@@ -3432,6 +3526,25 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
                                strprintf("Version must be %d or greater", MIN_PEER_PROTO_VERSION));
             pfrom->fDisconnect = true;
             return false;
+        }
+
+        // Disconnect if we have already met our quota of non-NODE_REPLACE_BY_FEE nodes.
+        if (!(pfrom->nServices & NODE_REPLACE_BY_FEE))
+        {
+            int nNonReplaceByFeeConnections = 0;
+
+            LOCK(cs_vNodes);
+            BOOST_FOREACH(CNode* pnode, vNodes) {
+                if (!(pnode->nServices & NODE_REPLACE_BY_FEE))
+                    nNonReplaceByFeeConnections++;
+            }
+
+            if (nNonReplaceByFeeConnections > nMaxConnections / 4) {
+                LogPrintf("reached quota of non-replace-by-fee nodes; disconnecting %s\n",
+                          pfrom->addr.ToString());
+                pfrom->fDisconnect = true;
+                return false;
+            }
         }
 
         if (pfrom->nVersion == 10300)
