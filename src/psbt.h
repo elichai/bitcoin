@@ -18,6 +18,7 @@ static constexpr uint8_t PSBT_MAGIC_BYTES[5] = {'p', 's', 'b', 't', 0xff};
 
 // Global types
 static constexpr uint8_t PSBT_GLOBAL_UNSIGNED_TX = 0x00;
+static constexpr uint8_t PSBT_GLOBAL_UNDEFINED = 0xFF;
 
 // Input types
 static constexpr uint8_t PSBT_IN_NON_WITNESS_UTXO = 0x00;
@@ -29,11 +30,15 @@ static constexpr uint8_t PSBT_IN_WITNESSSCRIPT = 0x05;
 static constexpr uint8_t PSBT_IN_BIP32_DERIVATION = 0x06;
 static constexpr uint8_t PSBT_IN_SCRIPTSIG = 0x07;
 static constexpr uint8_t PSBT_IN_SCRIPTWITNESS = 0x08;
+static constexpr uint8_t PSBT_IN_PAY_TO_CONTRACT = 0x0A;
+static constexpr uint8_t PSBT_IN_TAPROOT_PATH = 0x0B;
 
 // Output types
 static constexpr uint8_t PSBT_OUT_REDEEMSCRIPT = 0x00;
 static constexpr uint8_t PSBT_OUT_WITNESSSCRIPT = 0x01;
 static constexpr uint8_t PSBT_OUT_BIP32_DERIVATION = 0x02;
+static constexpr uint8_t PSBT_OUT_PAY_TO_CONTRACT = 0x03;
+static constexpr uint8_t PSBT_OUT_TAPROOT_PATH = 0x04;
 
 // The separator is 0x00. Reading this in means that the unserializer can interpret it
 // as a 0 length key which indicates that this is the separator. The separator has no value.
@@ -52,6 +57,7 @@ struct PSBTInput
     std::map<CKeyID, SigPair> partial_sigs;
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
     int sighash_type = 0;
+    std::map<CPubKey, uint256> pay_to_contracts;
 
     bool IsNull() const;
     void FillSignatureData(SignatureData& sigdata) const;
@@ -100,6 +106,16 @@ struct PSBTInput
 
             // Write any hd keypaths
             SerializeHDKeypaths(s, hd_keypaths, PSBT_IN_BIP32_DERIVATION);
+
+            // Write pay to contract tweaks if available
+            for (auto pubkey_and_tweak : pay_to_contracts) {
+                if (!pubkey_and_tweak.first.IsValid()) {
+                    throw std::ios_base::failure("Invalid PubKey is being serialized");
+                }
+
+                SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
+                s << pubkey_and_tweak.second;
+            }
         }
 
         // Write script sig
@@ -240,6 +256,29 @@ struct PSBTInput
                     UnserializeFromVector(s, final_script_witness.stack);
                     break;
                 }
+                case PSBT_IN_PAY_TO_CONTRACT:
+                {
+                    // Make sure that the key is the size of a *compressed* pubkey + 1
+                    if (key.size() != CPubKey::COMPRESSED_PUBLIC_KEY_SIZE + 1) {
+                        throw std::ios_base::failure("Size of key was not the expected size for the pay-to-contract pubkey(compressed)");
+                    }
+                    // Read in the pubkey from key
+                    CPubKey pubkey(key.begin() + 1, key.end());
+                    if (!pubkey.IsFullyValid()) {
+                        throw std::ios_base::failure("Invalid pubkey");
+                    }
+                    if (pay_to_contracts.count(pubkey) > 0) {
+                        throw std::ios_base::failure("Duplicate Key, input pay-to-contract tweak was already provided for this pubkey");
+                    }
+
+                    // Read the tweak from the value
+                    uint256 tweak;
+                    s >> tweak;
+
+                    // Add to list
+                    pay_to_contracts.emplace(pubkey, tweak);
+                    break;
+                }
                 // Unknown stuff
                 default:
                     if (unknown.count(key) > 0) {
@@ -271,6 +310,7 @@ struct PSBTOutput
     CScript witness_script;
     std::map<CPubKey, KeyOriginInfo> hd_keypaths;
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
+    std::map<CPubKey, uint256> pay_to_contracts;
 
     bool IsNull() const;
     void FillSignatureData(SignatureData& sigdata) const;
