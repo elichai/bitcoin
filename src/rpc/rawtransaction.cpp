@@ -1361,10 +1361,15 @@ UniValue createpsbt(const JSONRPCRequest& request)
                                     {"txid", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The transaction id"},
                                     {"vout", RPCArg::Type::NUM, RPCArg::Optional::NO, "The output number"},
                                     {"sequence", RPCArg::Type::NUM, /* default */ "depends on the value of the 'replaceable' and 'locktime' arguments", "The sequence number"},
+                                    {"tweaks", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "A json array of 33 byte compressed pubkeys and 32 byte tweaks",
+                                        {
+                                            { "pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A key-value pair. The key (string) is a hex-encoded 33-byte public key, the value is the hex-encoded 32-byte \"tweak\" "},
+                                        },
+                                    },
                                 },
-                                },
+                            },
                         },
-                        },
+                    },
                     {"outputs", RPCArg::Type::ARR, RPCArg::Optional::NO, "a json array with outputs (key-value pairs), where none of the keys are duplicated.\n"
                             "That is, each address can only appear once and there can only be one 'data' object.\n"
                             "For compatibility reasons, a dictionary, which holds the key-value pairs directly, is also\n"
@@ -1408,9 +1413,16 @@ UniValue createpsbt(const JSONRPCRequest& request)
     // Make a blank psbt
     PartiallySignedTransaction psbtx;
     psbtx.tx = rawTx;
+    UniValue inputs = request.params[0].get_array();
     for (unsigned int i = 0; i < rawTx.vin.size(); ++i) {
-        psbtx.inputs.push_back(PSBTInput());
+        PSBTInput psbt_input;
+        UniValue tweaks = find_value(inputs[i], "tweaks");
+        if (!tweaks.isNull() && tweaks.isObject()) {
+            psbt_input.pay_to_contracts = GetKeyTweaks(tweaks);
+        }
+        psbtx.inputs.push_back(psbt_input);
     }
+
     for (unsigned int i = 0; i < rawTx.vout.size(); ++i) {
         psbtx.outputs.push_back(PSBTOutput());
     }
@@ -1713,10 +1725,15 @@ UniValue analyzepsbt(const JSONRPCRequest& request)
     for (const auto& input : psbta.inputs) {
         UniValue input_univ(UniValue::VOBJ);
         UniValue missing(UniValue::VOBJ);
+        UniValue pay_to_contract_tweaks(UniValue::VOBJ);
 
         input_univ.pushKV("has_utxo", input.has_utxo);
         input_univ.pushKV("is_final", input.is_final);
         input_univ.pushKV("next", PSBTRoleName(input.next));
+
+        for (auto& tweak : input.pay_to_contracts) {
+            pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+        }
 
         if (!input.missing_pubkeys.empty()) {
             UniValue missing_pubkeys_univ(UniValue::VARR);
@@ -1740,6 +1757,9 @@ UniValue analyzepsbt(const JSONRPCRequest& request)
         }
         if (!missing.getKeys().empty()) {
             input_univ.pushKV("missing", missing);
+        }
+        if (!pay_to_contract_tweaks.getKeys().empty()) {
+            input_univ.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
         }
         inputs_result.push_back(input_univ);
     }

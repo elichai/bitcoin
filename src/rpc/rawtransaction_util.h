@@ -12,6 +12,8 @@ class UniValue;
 struct CMutableTransaction;
 class Coin;
 class COutPoint;
+class CPubKey;
+class uint256;
 
 /**
  * Sign a transaction with the given keystore and previous transactions
@@ -28,5 +30,7 @@ UniValue SignTransaction(CMutableTransaction& mtx, const UniValue& prevTxs, CBas
 
 /** Create a transaction from univalue parameters */
 CMutableTransaction ConstructTransaction(const UniValue& inputs_in, const UniValue& outputs_in, const UniValue& locktime, const UniValue& rbf);
+
+std::map<CPubKey, uint256> GetKeyTweaks(const UniValue& tweaks_arr);
 
 #endif // BITCOIN_RPC_RAWTRANSACTION_UTIL_H

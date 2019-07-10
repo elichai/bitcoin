@@ -19,6 +19,8 @@ struct PSBTInputAnalysis {
     std::vector<CKeyID> missing_sigs;    //!< Pubkeys whose signatures are missing
     uint160 missing_redeem_script;       //!< Hash160 of redeem script, if missing
     uint256 missing_witness_script;      //!< SHA256 of witness script, if missing
+
+    std::map<CPubKey, uint256> pay_to_contracts;
 };
 
 /**

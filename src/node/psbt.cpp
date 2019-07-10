@@ -27,6 +27,8 @@ PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
         PSBTInput& input = psbtx.inputs[i];
         PSBTInputAnalysis& input_analysis = result.inputs[i];
 
+        input_analysis.pay_to_contracts = input.pay_to_contracts;
+
         // Check for a UTXO
         CTxOut utxo;
         if (psbtx.GetInputUTXO(utxo, i)) {

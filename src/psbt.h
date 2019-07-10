@@ -550,7 +550,7 @@ struct PartiallySignedTransaction
 
         // Read input data
         unsigned int i = 0;
-        while (!s.empty() && i < tx->vin.size()) {
+        while (!s.empty() && tx->vin.size() > i) {
             PSBTInput input;
             s >> input;
             inputs.push_back(input);
@@ -568,7 +568,7 @@ struct PartiallySignedTransaction
 
         // Read output data
         i = 0;
-        while (!s.empty() && i < tx->vout.size()) {
+        while (!s.empty() && tx->vout.size() > i) {
             PSBTOutput output;
             s >> output;
             outputs.push_back(output);
@@ -588,6 +588,9 @@ struct PartiallySignedTransaction
     PartiallySignedTransaction(deserialize_type, Stream& s) {
         Unserialize(s);
     }
+
+    PartiallySignedTransaction& operator=(const PartiallySignedTransaction&) = default;
+
 };
 
 enum class PSBTRole {

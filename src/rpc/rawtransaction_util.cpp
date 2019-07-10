@@ -283,3 +283,19 @@ UniValue SignTransaction(CMutableTransaction& mtx, const UniValue& prevTxsUnival
 
     return result;
 }
+
+std::map<CPubKey, uint256> GetKeyTweaks(const UniValue& tweaks_arr) {
+    std::map<CPubKey, uint256> pay_to_contracts;
+    for (unsigned int i = 0; i < tweaks_arr.get_obj().getKeys().size(); i++) {
+        std::vector<unsigned char> pubkey_bytes = ParseHexV(tweaks_arr.getKeys()[i], "PublicKey");
+
+        if (pubkey_bytes.size() != 33) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Compressed PublicKey should be exactly 33 bytes.");
+        }
+        uint256 tweak = ParseHashV(tweaks_arr.getValues()[i], "pay-to-contract tweak");
+        pay_to_contracts.emplace(CPubKey(pubkey_bytes), tweak);
+    }
+    return pay_to_contracts;
+}
+
+
