@@ -24,8 +24,7 @@ CMutableTransaction ConstructTransaction(const UniValue& inputs_in, const UniVal
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, arguments 1 and 2 must be non-null");
 
     UniValue inputs = inputs_in.get_array();
-    const bool outputs_is_obj = outputs_in.isObject();
-    UniValue outputs = outputs_is_obj ? outputs_in.get_obj() : outputs_in.get_array();
+    UniValue outputs = ArrayOrObjectToObject(outputs_in);
 
     CMutableTransaction rawTx;
 
@@ -74,22 +73,6 @@ CMutableTransaction ConstructTransaction(const UniValue& inputs_in, const UniVal
         CTxIn in(COutPoint(txid, nOutput), CScript(), nSequence);
 
         rawTx.vin.push_back(in);
-    }
-
-    if (!outputs_is_obj) {
-        // Translate array of key-value pairs into dict
-        UniValue outputs_dict = UniValue(UniValue::VOBJ);
-        for (size_t i = 0; i < outputs.size(); ++i) {
-            const UniValue& output = outputs[i];
-            if (!output.isObject()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, key-value pair not an object as expected");
-            }
-            if (output.size() != 1) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, key-value pair must contain exactly one key");
-            }
-            outputs_dict.pushKVs(output);
-        }
-        outputs = std::move(outputs_dict);
     }
 
     // Duplicate checking
@@ -298,4 +281,27 @@ std::map<CPubKey, uint256> GetKeyTweaks(const UniValue& tweaks_arr) {
     return pay_to_contracts;
 }
 
+// TODO: Should this be moved to `src/univalue/lib`?
+UniValue ArrayOrObjectToObject(const UniValue& val)
+{
+    if (!val.isObject()) {
+        UniValue val_local = val.get_array();
+        // Translate array of key-value pairs into dict
+        UniValue retval = UniValue(UniValue::VOBJ);
+        for (size_t i = 0; i < val_local.size(); ++i) {
+            const UniValue& val_i = val_local[i];
+            if (!val_i.isObject()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, key-value pair not an object as expected");
+            }
+            if (val_i.size() != 1) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, key-value pair must contain exactly one key");
+            }
+            retval.pushKVs(val_i);
+        }
+        return retval;
+    } else {
+        return val.get_obj();
+    }
+
+}
 

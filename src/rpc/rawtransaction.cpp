@@ -1156,6 +1156,14 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             in.pushKV("bip32_derivs", keypaths);
         }
 
+        if (!input.pay_to_contracts.empty()) {
+            UniValue pay_to_contract_tweaks(UniValue::VOBJ);
+            for (auto& tweak : input.pay_to_contracts) {
+                pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+            }
+            in.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
+        }
+
         // Final scriptSig and scriptwitness
         if (!input.final_script_sig.empty()) {
             UniValue scriptsig(UniValue::VOBJ);
@@ -1213,6 +1221,14 @@ UniValue decodepsbt(const JSONRPCRequest& request)
                 keypaths.push_back(keypath);
             }
             out.pushKV("bip32_derivs", keypaths);
+        }
+
+        if (!output.pay_to_contracts.empty()) {
+            UniValue pay_to_contract_tweaks(UniValue::VOBJ);
+            for (auto& tweak : output.pay_to_contracts) {
+                pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+            }
+            out.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
         }
 
         // Unknown data
@@ -1379,14 +1395,19 @@ UniValue createpsbt(const JSONRPCRequest& request)
                                 {
                                     {"address", RPCArg::Type::AMOUNT, RPCArg::Optional::NO, "A key-value pair. The key (string) is the bitcoin address, the value (float or string) is the amount in " + CURRENCY_UNIT},
                                 },
-                                },
+                            },
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
                                 {
                                     {"data", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "A key-value pair. The key must be \"data\", the value is hex-encoded data"},
                                 },
+                            },
+                            {"tweaks", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "A json array of 33 byte compressed pubkeys and 32 byte tweaks",
+                                {
+                                    { "pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A key-value pair. The key (string) is a hex-encoded 33-byte public key, the value is the hex-encoded 32-byte \"tweak\" "},
                                 },
+                            },
                         },
-                        },
+                    },
                     {"locktime", RPCArg::Type::NUM, /* default */ "0", "Raw locktime. Non-0 value also locktime-activates inputs"},
                     {"replaceable", RPCArg::Type::BOOL, /* default */ "false", "Marks this transaction as BIP125 replaceable.\n"
                             "                             Allows this transaction to be replaced by a transaction with higher fees. If provided, it is an error if explicit sequence numbers are incompatible."},
@@ -1423,8 +1444,14 @@ UniValue createpsbt(const JSONRPCRequest& request)
         psbtx.inputs.push_back(psbt_input);
     }
 
+    UniValue outputs = ArrayOrObjectToObject(request.params[0].get_obj());
     for (unsigned int i = 0; i < rawTx.vout.size(); ++i) {
-        psbtx.outputs.push_back(PSBTOutput());
+        PSBTOutput psbt_output;
+        UniValue tweaks = find_value(outputs[i], "tweaks");
+        if (!tweaks.isNull() && tweaks.isObject()) {
+            psbt_output.pay_to_contracts = GetKeyTweaks(tweaks);
+        }
+        psbtx.outputs.push_back(psbt_output);
     }
 
     // Serialize the PSBT

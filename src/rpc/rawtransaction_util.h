@@ -33,4 +33,6 @@ CMutableTransaction ConstructTransaction(const UniValue& inputs_in, const UniVal
 
 std::map<CPubKey, uint256> GetKeyTweaks(const UniValue& tweaks_arr);
 
+UniValue ArrayOrObjectToObject(const UniValue& val);
+
 #endif // BITCOIN_RPC_RAWTRANSACTION_UTIL_H
