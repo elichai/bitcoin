@@ -1164,6 +1164,18 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             in.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
         }
 
+        if (!input.taproot_script.empty()) {
+            UniValue script(UniValue::VOBJ);
+            ScriptToUniv(input.taproot_script, script, false);
+            in.pushKV("taproot_script", script);
+
+            UniValue paths(UniValue::VARR);
+            for (auto& path : input.taproot_paths) {
+                paths.push_back(HexStr(path));
+            }
+            in.pushKV("merkle_path", paths);
+        }
+
         // Final scriptSig and scriptwitness
         if (!input.final_script_sig.empty()) {
             UniValue scriptsig(UniValue::VOBJ);
@@ -1382,6 +1394,16 @@ UniValue createpsbt(const JSONRPCRequest& request)
                                             { "pubkey", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A key-value pair. The key (string) is a hex-encoded 33-byte public key, the value is the hex-encoded 32-byte \"tweak\" "},
                                         },
                                     },
+                                    {"taproot", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "A json with that taproot path needed to spend",
+                                        {
+                                            {"taprootScript", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "The taproot script for spending"},
+                                            {"merklepath", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "A merkle path from the script to the root",
+                                                {
+                                                     {"path", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "32 byte hash of the merkle uncle"},
+                                                },
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -1441,10 +1463,28 @@ UniValue createpsbt(const JSONRPCRequest& request)
         if (!tweaks.isNull() && tweaks.isObject()) {
             psbt_input.pay_to_contracts = GetKeyTweaks(tweaks);
         }
+
+        UniValue taproot = find_value(inputs[i], "taproot");
+        if (!taproot.isNull() && taproot.isObject()) {
+            UniValue taproot_script = find_value(taproot.get_obj(), "taprootScript");
+            if (taproot_script.isNull()) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "taproot object without taprootScript");
+            }
+            psbt_input.taproot_script << ParseHexV(taproot_script, "taprootScript");
+
+            UniValue merklepath = find_value(taproot.get_obj(), "merklepath");
+            if (!merklepath.isNull()) {
+                for (auto& path : merklepath.getValues()) {
+                    psbt_input.taproot_paths.emplace_back(ParseHashV(path, "merkle path"));
+                }
+            }
+        }
+        if (!taproot.isNull() && tweaks.isNull()) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "You can't provide a taproot without a pay-to-contract");
+        }
         psbtx.inputs.push_back(psbt_input);
     }
-
-    UniValue outputs = ArrayOrObjectToObject(request.params[0].get_obj());
+    UniValue outputs = ArrayOrObjectToObject(request.params[1]).get_obj();
     for (unsigned int i = 0; i < rawTx.vout.size(); ++i) {
         PSBTOutput psbt_output;
         UniValue tweaks = find_value(outputs[i], "tweaks");

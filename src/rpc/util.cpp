@@ -620,8 +620,7 @@ std::string RPCArg::ToStringObj(const bool oneline) const
         return res + "...]";
     case Type::OBJ:
     case Type::OBJ_USER_KEYS:
-        // Currently unused, so avoid writing dead code
-        assert(false);
+        return ToString(oneline);
 
         // no default case, so the compiler can warn about missing cases
     }
