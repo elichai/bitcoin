@@ -118,10 +118,10 @@ struct PSBTInput
                 SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
                 s << pubkey_and_tweak.second;
             }
-
             // Write the taproot script
             if (!taproot_script.empty()) {
-                WriteCompactSize(s, taproot_script.size() + 1 +  (taproot_paths.size() + 1) * sizeof(uint256));
+                SerializeToVector(s, PSBT_IN_TAPROOT_PATH);
+                WriteCompactSize(s, taproot_script.size() +  (taproot_paths.size() * sizeof(uint256)));
                 s << taproot_script;
                 for (auto& path : taproot_paths) {
                     s << path;
@@ -340,6 +340,8 @@ struct PSBTOutput
     std::map<CPubKey, KeyOriginInfo> hd_keypaths;
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
     std::map<CPubKey, uint256> pay_to_contracts;
+    CScript taproot_script;
+    std::vector<uint256> taproot_paths;
 
     bool IsNull() const;
     void FillSignatureData(SignatureData& sigdata) const;
@@ -373,6 +375,16 @@ struct PSBTOutput
 
             SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
             s << pubkey_and_tweak.second;
+        }
+
+        // Write the taproot script
+        if (!taproot_script.empty()) {
+            SerializeToVector(s, PSBT_IN_TAPROOT_PATH);
+            WriteCompactSize(s, taproot_script.size() +  (taproot_paths.size() * sizeof(uint256)));
+            s << taproot_script;
+            for (auto& path : taproot_paths) {
+                s << path;
+            }
         }
 
         // Write unknown things
@@ -450,6 +462,24 @@ struct PSBTOutput
                     s >> tweak;
                     // Add to list
                     pay_to_contracts.emplace(pubkey, tweak);
+                    break;
+                }
+                case PSBT_OUT_TAPROOT_PATH:
+                {
+                    if (!taproot_script.empty()) {
+                        throw std::ios_base::failure("Duplicate Key, input Taproot Path already provided");
+                    } else if (key.size() != 1) {
+                        throw std::ios_base::failure("Taproot path key is more than one byte type");
+                    }
+
+                    uint64_t value_len = ReadCompactSize(s);
+                    s >> taproot_script;
+
+                    for (auto i = taproot_script.size(); i < value_len; i+= sizeof(uint256) ) {
+                        uint256 path;
+                        s >> path;
+                        taproot_paths.emplace_back(path);
+                    }
                     break;
                 }
                 // Unknown stuff

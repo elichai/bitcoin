@@ -6,6 +6,7 @@
 #include <util/strencodings.h>
 
 #include <numeric>
+#include <iostream>
 
 PartiallySignedTransaction::PartiallySignedTransaction(const CMutableTransaction& tx) : tx(tx)
 {
@@ -361,11 +362,14 @@ std::string PSBTRoleName(PSBTRole role) {
 bool DecodeBase64PSBT(PartiallySignedTransaction& psbt, const std::string& base64_tx, std::string& error)
 {
     bool invalid;
+    std::cout << "starting psbt decoding\n";
     std::string tx_data = DecodeBase64(base64_tx, &invalid);
+    std::cout << "finished base64 decoding\n";
     if (invalid) {
         error = "invalid base64";
         return false;
     }
+    std::cout << "starting actual decode\n";
     return DecodeRawPSBT(psbt, tx_data, error);
 }
 
@@ -379,7 +383,9 @@ bool DecodeRawPSBT(PartiallySignedTransaction& psbt, const std::string& tx_data,
             return false;
         }
     } catch (const std::exception& e) {
+        std::cout << "shit\n";
         error = e.what();
+        std::cout << error << "\n";
         return false;
     }
     return true;
