@@ -1121,6 +1121,14 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             in.pushKV("bip32_derivs", keypaths);
         }
 
+        if (!input.pay_to_contracts.empty()) {
+            UniValue pay_to_contract_tweaks(UniValue::VOBJ);
+            for (auto& tweak : input.pay_to_contracts) {
+                pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+            }
+            in.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
+        }
+
         // Final scriptSig and scriptwitness
         if (!input.final_script_sig.empty()) {
             UniValue scriptsig(UniValue::VOBJ);
@@ -1178,6 +1186,14 @@ UniValue decodepsbt(const JSONRPCRequest& request)
                 keypaths.push_back(keypath);
             }
             out.pushKV("bip32_derivs", keypaths);
+        }
+
+        if (!output.pay_to_contracts.empty()) {
+            UniValue pay_to_contract_tweaks(UniValue::VOBJ);
+            for (auto& tweak : output.pay_to_contracts) {
+                pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+            }
+            out.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
         }
 
         // Unknown data

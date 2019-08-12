@@ -337,6 +337,16 @@ struct PSBTOutput
         // Write any hd keypaths
         SerializeHDKeypaths(s, hd_keypaths, PSBT_OUT_BIP32_DERIVATION);
 
+        // Write pay to contract tweaks if available
+        for (auto pubkey_and_tweak : pay_to_contracts) {
+            if (!pubkey_and_tweak.first.IsValid()) {
+                throw std::ios_base::failure("Invalid PubKey is being serialized");
+            }
+
+            SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
+            s << pubkey_and_tweak.second;
+        }
+
         // Write unknown things
         for (auto& entry : unknown) {
             s << entry.first;
@@ -391,6 +401,27 @@ struct PSBTOutput
                 case PSBT_OUT_BIP32_DERIVATION:
                 {
                     DeserializeHDKeypaths(s, key, hd_keypaths);
+                    break;
+                }
+                case PSBT_OUT_PAY_TO_CONTRACT:
+                {
+                    // Make sure that the key is the size of a *compressed* pubkey + 1
+                    if (key.size() != CPubKey::COMPRESSED_PUBLIC_KEY_SIZE + 1) {
+                        throw std::ios_base::failure("Size of key was not the expected size for the pay-to-contract pubkey(compressed)");
+                    }
+                    // Read in the pubkey from key
+                    CPubKey pubkey(key.begin() + 1, key.end());
+                    if (!pubkey.IsFullyValid()) {
+                        throw std::ios_base::failure("Invalid pubkey");
+                    }
+                    if (pay_to_contracts.count(pubkey) > 0) {
+                        throw std::ios_base::failure("Duplicate Key, input pay-to-contract tweak was already provided for this pubkey");
+                    }
+                    // Read the tweak from the value
+                    uint256 tweak;
+                    s >> tweak;
+                    // Add to list
+                    pay_to_contracts.emplace(pubkey, tweak);
                     break;
                 }
                 // Unknown stuff
