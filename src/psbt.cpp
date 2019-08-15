@@ -107,6 +107,12 @@ void PSBTInput::FillSignatureData(SignatureData& sigdata) const
     for (const auto& key_pair : hd_keypaths) {
         sigdata.misc_pubkeys.emplace(key_pair.first.GetID(), key_pair);
     }
+    if (!p2c_tweaks.empty()) {
+        sigdata.p2c_tweaks = p2c_tweaks;
+    }
+    if (!taproot_script_path.leaf.empty()) {
+        sigdata.taproot_script_path = taproot_script_path;
+    }
 }
 
 void PSBTInput::FromSignatureData(const SignatureData& sigdata)
@@ -116,6 +122,8 @@ void PSBTInput::FromSignatureData(const SignatureData& sigdata)
         hd_keypaths.clear();
         redeem_script.clear();
         witness_script.clear();
+        p2c_tweaks.clear();
+        taproot_script_path.clear();
 
         if (!sigdata.scriptSig.empty()) {
             final_script_sig = sigdata.scriptSig;
@@ -136,6 +144,10 @@ void PSBTInput::FromSignatureData(const SignatureData& sigdata)
     for (const auto& entry : sigdata.misc_pubkeys) {
         hd_keypaths.emplace(entry.second);
     }
+    if (taproot_script_path.leaf.empty() && !sigdata.taproot_script_path.leaf.empty()) {
+        taproot_script_path = sigdata.taproot_script_path;
+    }
+    p2c_tweaks.insert(sigdata.p2c_tweaks.begin(), sigdata.p2c_tweaks.end());
 }
 
 void PSBTInput::Merge(const PSBTInput& input)
@@ -164,6 +176,11 @@ bool PSBTInput::IsSane() const
     // If we have a witness_script or a scriptWitness, we must also have a witness utxo
     if (!witness_script.empty() && witness_utxo.IsNull()) return false;
     if (!final_script_witness.IsNull() && witness_utxo.IsNull()) return false;
+    // Cannot have both a tapscript and a witness/redeem script.
+    if (!taproot_script_path.leaf.empty() && (!witness_script.empty() || !redeem_script.empty())) return false;
+    // Having a merkle path but no leaf makes no sense.
+    if (!taproot_script_path.path.empty() && taproot_script_path.leaf.empty()) return false;
+
 
     return true;
 }
@@ -179,6 +196,7 @@ void PSBTOutput::FillSignatureData(SignatureData& sigdata) const
     for (const auto& key_pair : hd_keypaths) {
         sigdata.misc_pubkeys.emplace(key_pair.first.GetID(), key_pair);
     }
+    sigdata.p2c_tweaks.insert(p2c_tweaks.begin(), p2c_tweaks.end());
 }
 
 void PSBTOutput::FromSignatureData(const SignatureData& sigdata)

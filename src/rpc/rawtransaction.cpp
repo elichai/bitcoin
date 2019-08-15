@@ -1121,13 +1121,28 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             in.pushKV("bip32_derivs", keypaths);
         }
 
-        if (!input.pay_to_contracts.empty()) {
+        if (!input.p2c_tweaks.empty()) {
             UniValue pay_to_contract_tweaks(UniValue::VOBJ);
-            for (auto& tweak : input.pay_to_contracts) {
+            for (auto& tweak : input.p2c_tweaks) {
                 pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
             }
             in.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
         }
+
+        if (!input.taproot_script_path.leaf.empty()) {
+            UniValue taproot(UniValue::VOBJ);
+            UniValue tapscript(UniValue::VOBJ);
+            UniValue path(UniValue::VARR);
+            for (const auto& p : input.taproot_script_path.path){
+                path.push_back(HexStr(p));
+            }
+            taproot.pushKV("path", path);
+            ScriptToUniv(input.taproot_script_path.leaf, tapscript, false);
+            taproot.pushKV("tapscript", tapscript);
+
+            in.pushKV("Taproot", taproot);
+        }
+
 
         // Final scriptSig and scriptwitness
         if (!input.final_script_sig.empty()) {
@@ -1188,12 +1203,12 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             out.pushKV("bip32_derivs", keypaths);
         }
 
-        if (!output.pay_to_contracts.empty()) {
-            UniValue pay_to_contract_tweaks(UniValue::VOBJ);
-            for (auto& tweak : output.pay_to_contracts) {
-                pay_to_contract_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
+        if (!output.p2c_tweaks.empty()) {
+            UniValue p2c_tweaks(UniValue::VOBJ);
+            for (auto& tweak : output.p2c_tweaks) {
+                p2c_tweaks.pushKV(HexStr(tweak.first), HexStr(tweak.second));
             }
-            out.pushKV("Pay-to-Contract", pay_to_contract_tweaks);
+            out.pushKV("Pay-to-Contract", p2c_tweaks);
         }
 
         // Unknown data
@@ -1530,6 +1545,7 @@ UniValue utxoupdatepsbt(const JSONRPCRequest& request)
         }
 
         const Coin& coin = view.AccessCoin(psbtx.tx->vin[i].prevout);
+
 
         if (IsSegWitOutput(provider, coin.out.scriptPubKey)) {
             input.witness_utxo = coin.out;

@@ -58,7 +58,8 @@ struct PSBTInput
     std::map<CKeyID, SigPair> partial_sigs;
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
     int sighash_type = 0;
-    std::map<CPubKey, uint256> pay_to_contracts;
+    std::map<CPubKey, uint256> p2c_tweaks;
+    ScriptPath taproot_script_path;
 
     bool IsNull() const;
     void FillSignatureData(SignatureData& sigdata) const;
@@ -109,13 +110,20 @@ struct PSBTInput
             SerializeHDKeypaths(s, hd_keypaths, PSBT_IN_BIP32_DERIVATION);
 
             // Write pay to contract tweaks if available
-            for (auto pubkey_and_tweak : pay_to_contracts) {
+            for (auto pubkey_and_tweak : p2c_tweaks) {
                 if (!pubkey_and_tweak.first.IsValid()) {
                     throw std::ios_base::failure("Invalid PubKey is being serialized");
                 }
 
                 SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
                 s << pubkey_and_tweak.second;
+            }
+
+            // Write the taproot script
+            if (!taproot_script_path.leaf.empty()) {
+                SerializeToVector(s, PSBT_IN_TAPROOT_PATH);
+                s << taproot_script_path.leaf;
+                s << taproot_script_path.path;
             }
         }
 
@@ -268,7 +276,7 @@ struct PSBTInput
                     if (!pubkey.IsFullyValid()) {
                         throw std::ios_base::failure("Invalid pubkey");
                     }
-                    if (pay_to_contracts.count(pubkey) > 0) {
+                    if (p2c_tweaks.count(pubkey) > 0) {
                         throw std::ios_base::failure("Duplicate Key, input pay-to-contract tweak was already provided for this pubkey");
                     }
 
@@ -277,7 +285,18 @@ struct PSBTInput
                     s >> tweak;
 
                     // Add to list
-                    pay_to_contracts.emplace(pubkey, tweak);
+                    p2c_tweaks.emplace(pubkey, tweak);
+                    break;
+                }
+                case PSBT_IN_TAPROOT_PATH:
+                {
+                    if (!taproot_script_path.leaf.empty()) {
+                        throw std::ios_base::failure("Duplicate Key, input Taproot Path already provided");
+                    } else if (key.size() != 1) {
+                        throw std::ios_base::failure("Taproot path key is more than one byte type");
+                    }
+                    s >> taproot_script_path.leaf;
+                    s >> taproot_script_path.path;
                     break;
                 }
                 // Unknown stuff
@@ -311,7 +330,8 @@ struct PSBTOutput
     CScript witness_script;
     std::map<CPubKey, KeyOriginInfo> hd_keypaths;
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
-    std::map<CPubKey, uint256> pay_to_contracts;
+    std::map<CPubKey, uint256> p2c_tweaks;
+    ScriptPath taproot_script_path;
 
     bool IsNull() const;
     void FillSignatureData(SignatureData& sigdata) const;
@@ -338,13 +358,19 @@ struct PSBTOutput
         SerializeHDKeypaths(s, hd_keypaths, PSBT_OUT_BIP32_DERIVATION);
 
         // Write pay to contract tweaks if available
-        for (auto pubkey_and_tweak : pay_to_contracts) {
+        for (auto pubkey_and_tweak : p2c_tweaks) {
             if (!pubkey_and_tweak.first.IsValid()) {
                 throw std::ios_base::failure("Invalid PubKey is being serialized");
             }
-
-            SerializeToVector(s, PSBT_IN_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
+            SerializeToVector(s, PSBT_OUT_PAY_TO_CONTRACT, MakeSpan(pubkey_and_tweak.first));
             s << pubkey_and_tweak.second;
+        }
+
+        // Write the taproot script
+        if (!taproot_script_path.leaf.empty()) {
+            SerializeToVector(s, PSBT_OUT_TAPROOT_PATH);
+            s << taproot_script_path.leaf;
+            s << taproot_script_path.path;
         }
 
         // Write unknown things
@@ -414,14 +440,25 @@ struct PSBTOutput
                     if (!pubkey.IsFullyValid()) {
                         throw std::ios_base::failure("Invalid pubkey");
                     }
-                    if (pay_to_contracts.count(pubkey) > 0) {
+                    if (p2c_tweaks.count(pubkey) > 0) {
                         throw std::ios_base::failure("Duplicate Key, input pay-to-contract tweak was already provided for this pubkey");
                     }
                     // Read the tweak from the value
                     uint256 tweak;
                     s >> tweak;
                     // Add to list
-                    pay_to_contracts.emplace(pubkey, tweak);
+                    p2c_tweaks.emplace(pubkey, tweak);
+                    break;
+                }
+                case PSBT_OUT_TAPROOT_PATH:
+                {
+                    if (!taproot_script_path.leaf.empty()) {
+                        throw std::ios_base::failure("Duplicate Key, input Taproot Path already provided");
+                    } else if (key.size() != 1) {
+                        throw std::ios_base::failure("Taproot path key is more than one byte type");
+                    }
+                    s >> taproot_script_path.leaf;
+                    s >> taproot_script_path.path;
                     break;
                 }
                 // Unknown stuff
