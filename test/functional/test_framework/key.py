@@ -8,6 +8,7 @@ keys, and is trivially vulnerable to side channel attacks. Do not use for
 anything but tests."""
 import random
 import hashlib
+from test_framework.messages import hash256
 
 def modinv(a, n):
     """Compute the modular inverse of a modulo n
@@ -219,6 +220,18 @@ SECP256K1_G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F8179
 SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 SECP256K1_ORDER_HALF = SECP256K1_ORDER // 2
 
+chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+def _byte_to_base58(b):
+    result = ''
+    value = int.from_bytes(b, 'big')
+    while value > 0:
+        result = chars[value % 58] + result
+        value //= 58
+    while b[0] == 0:
+        result = chars[0] + result
+        b = b[0:]
+    return result
+
 class ECPubKey():
     """A secp256k1 public key"""
 
@@ -356,6 +369,20 @@ class ECPubKey():
         ret.compressed = self.compressed
         return ret
 
+    def hash_to_curve(self, data=b'Bitcoin Test Framework', compressed=True):
+        data_hash = int.from_bytes(hashlib.sha256(data).digest(), 'big')
+        
+        while data_hash >= SECP256K1_ORDER or not SECP256K1.is_x_coord(data_hash):
+            data_hash = int.from_bytes(hashlib.sha256(data_hash.to_bytes(32, 'big')).digest(), 'big')
+
+        p = SECP256K1.lift_x(data_hash)
+        assert p is not None
+        self.p = p
+        self.valid = True
+        self.compressed = compressed
+
+
+
 class ECKey():
     """A secp256k1 private key"""
 
@@ -379,6 +406,16 @@ class ECKey():
         """Retrieve the 32-byte representation of this key."""
         assert(self.valid)
         return self.secret.to_bytes(32, 'big')
+
+    def get_wif(self, mainnet=False):
+        """Retrieve the WIF representation of this key"""
+        net = b'\x80' if mainnet else b'\xef'
+        ret = net + self.get_bytes()
+        if self.is_compressed:
+            ret += b'\x01'
+        ret_hash = hash256(ret)
+        ret += ret_hash[:4]
+        return _byte_to_base58(ret)
 
     @property
     def is_valid(self):
