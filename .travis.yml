@@ -102,7 +102,7 @@ jobs:
 
     - stage: test
       name: 'PowerPC64  [GOAL: install]  [unit tests, functional tests]'
-      os: linux-ppc64le
+      os: linux-ppc64be
       env: >-
         FILE_ENV="./ci/test/00_setup_env_powerpc64.sh"
 
