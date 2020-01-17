@@ -72,7 +72,8 @@ EXPECTED_BOOST_INCLUDES=(
     boost/thread/condition_variable.hpp
     boost/thread/mutex.hpp
     boost/thread/thread.hpp
-    boost/variant.hpp
+    boost/variant/get.hpp
+    boost/variant/variant.hpp
     boost/variant/apply_visitor.hpp
     boost/variant/static_visitor.hpp
 )
