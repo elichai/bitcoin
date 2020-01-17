@@ -35,11 +35,6 @@ public:
         m_var = std::move(other.m_var);
     }
     template <class T>
-    Variant(T& value)
-    {
-        m_var = value;
-    }
-    template <class T>
     Variant(const T& value)
     {
         m_var = value;
